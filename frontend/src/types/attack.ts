@@ -33,12 +33,9 @@ export interface AttackResponse {
 }
 
 export interface SampleInfo {
-  id: string;
   name: string;
   local_path: string;
   duration_sec: number;
-  duration: number;
-  format: string;
   transcription: string;
 }
 

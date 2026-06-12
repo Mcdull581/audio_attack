@@ -26,6 +26,7 @@ import asyncio
 import json
 import logging
 import queue  # stdlib — thread-safe, NOT asyncio.Queue
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict
@@ -123,6 +124,8 @@ async def attack_ws_endpoint(websocket: WebSocket, attack_id: str) -> None:
 
     # ── Thread-safe progress queue ─────────────────────────────────────
     q: queue.Queue[dict] = queue.Queue()
+    # Cancellation flag — set when WebSocket disconnects to stop the attack thread
+    cancel_event = threading.Event()
 
     def _attack_runner_sync() -> None:
         """Runs in a background thread — PyTorch + file I/O."""
@@ -137,6 +140,7 @@ async def attack_ws_endpoint(websocket: WebSocket, attack_id: str) -> None:
                 "max_iterations": job.config.max_iterations,
                 "lambda_l2": job.config.lambda_l2,
                 "learning_rate": job.config.learning_rate,
+                "cancel_event": cancel_event,  # thread-safe stop signal
             }
 
             # Progress callback — pushes into the thread-safe queue
@@ -196,6 +200,16 @@ async def attack_ws_endpoint(websocket: WebSocket, attack_id: str) -> None:
                 "message": "Unexpected error during attack execution. Check server logs.",
                 "timestamp": time.time(),
             })
+        finally:
+            # ── Explicit GPU / CPU memory cleanup ────────────────────────
+            import gc
+            import torch
+            # Trigger Python GC to release any lingering tensor references
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            logger.debug("Memory cleanup completed for attack_id=%s", attack_id)
 
     # ── Spawn attack in background thread ──────────────────────────────
     loop = asyncio.get_running_loop()
@@ -220,7 +234,8 @@ async def attack_ws_endpoint(websocket: WebSocket, attack_id: str) -> None:
                 break
 
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected mid-attack for attack_id=%s", attack_id)
+        logger.info("WebSocket disconnected mid-attack for attack_id=%s — signalling cancel", attack_id)
+        cancel_event.set()  # stop the attack thread
         job.status = AttackStatus.CANCELLED
     except Exception:
         logger.exception("Unexpected error in WebSocket loop for attack_id=%s", attack_id)

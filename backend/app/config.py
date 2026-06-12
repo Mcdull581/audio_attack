@@ -39,6 +39,12 @@ DEFAULT_LEARNING_RATE: float = 5e-4
 import torch
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Startup verification
+if DEVICE.type == "cuda":
+    _props = torch.cuda.get_device_properties(0)
+    print(f"[CONFIG] CUDA ENABLED: {_props.name} ({_props.total_memory // 1024**2} MiB VRAM)")
+else:
+    print("[CONFIG] WARNING: CUDA not available — running on CPU (expect slow training)")
 
 # ── Attack State Machine ─────────────────────────────────────────────────
 class AttackStatus(str, enum.Enum):

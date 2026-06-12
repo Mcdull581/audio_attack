@@ -30,16 +30,10 @@ const VALID_TYPES: ReadonlySet<string> = new Set<WsMessageType>([
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function buildWsUrl(attackId: string): string {
-  const host =
-    typeof location !== 'undefined'
-      ? `${location.host}/ws/attack/${attackId}`
-      : `localhost:8000/ws/attack/${attackId}`;
-  const protocol = location?.protocol === 'https:' ? 'wss' : 'ws';
-  if (import.meta.env.DEV) {
-    // In dev, connect directly to the backend port (bypasses Vite proxy)
-    return `ws://localhost:8000/ws/attack/${attackId}`;
-  }
-  return `${protocol}://${host}`;
+  // Always go through same origin (Vite proxy in dev, same server in prod)
+  const protocol = typeof location !== 'undefined' && location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = typeof location !== 'undefined' ? location.host : 'localhost:28000';
+  return `${protocol}://${host}/ws/attack/${attackId}`;
 }
 
 function isValidMessage(raw: unknown): raw is WsMessage {
@@ -152,13 +146,15 @@ export function useWebSocket(attackId: Ref<string | null> | string) {
     }
 
     socket.onopen = () => {
+      console.log('[WS] Connected to', url);
       isConnected.value = true;
-      retryCount = 0; // reset backoff on successful connection
+      retryCount = 0;
     };
 
     socket.onmessage = handleMessage;
 
     socket.onclose = (event) => {
+      console.log('[WS] Closed:', event.code, event.reason);
       isConnected.value = false;
 
       if (manualDisconnect) return;
@@ -174,7 +170,7 @@ export function useWebSocket(attackId: Ref<string | null> | string) {
     };
 
     socket.onerror = () => {
-      // onclose will fire after onerror; reconnect is handled there
+      console.warn('[WS] Error on', url);
     };
   }
 

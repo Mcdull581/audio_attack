@@ -9,7 +9,7 @@ import websockets
 
 
 async def monitor_attack(attack_id: str):
-    uri = f"ws://localhost:8000/ws/attack/{attack_id}"
+    uri = f"ws://localhost:28000/ws/attack/{attack_id}"
     print(f"Connecting to {uri} ...\n")
 
     try:

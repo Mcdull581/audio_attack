@@ -71,8 +71,13 @@ def run_cw_attack_sync(
     lambda_l2: float = float(config_dict["lambda_l2"])
     learning_rate: float = float(config_dict["learning_rate"])
     push_interval: int = max(1, max_iterations // 200)
+    cancel_event = config_dict.get("cancel_event")  # threading.Event or None
 
     device = wrapper.device
+
+    # ── Device guard: ensure waveform is on the correct device ──────────
+    if str(waveform.device) != str(device):
+        waveform = waveform.to(device)
 
     # ── normalise waveform shape ───────────────────────────────────────
     # Keep waveform 1D — the processor handles batch-dim internally.
@@ -102,6 +107,8 @@ def run_cw_attack_sync(
     target_lengths = torch.tensor([target_len], dtype=torch.long, device=device)
 
     adv_logits: torch.Tensor | None = None
+    ctc_loss: torch.Tensor | None = None
+    l2_norm: torch.Tensor | None = None
 
     logger.info(
         "CW attack start  id=%s  target=%r  ε=%.4f  max_iter=%d  λ=%.2e  lr=%.2e",
@@ -110,6 +117,11 @@ def run_cw_attack_sync(
 
     # ── Main CW loop ──────────────────────────────────────────────────
     for iteration in range(1, max_iterations + 1):
+        # ── Check for cancellation (WebSocket disconnect) ──────────────
+        if cancel_event is not None and cancel_event.is_set():
+            logger.info("CW attack cancelled at iter=%d id=%s", iteration, attack_id)
+            break
+
         # a. perturbed input
         adv_input = input_values_orig + delta
 
@@ -166,12 +178,14 @@ def run_cw_attack_sync(
             })
 
     # ── final results ─────────────────────────────────────────────────
+    cancelled = cancel_event is not None and cancel_event.is_set()
     with torch.no_grad():
-        final_text = wrapper.decode(adv_logits)
-        final_ctc = float(ctc_loss.item()) if adv_logits is not None else float("nan")
-        final_l2 = float(l2_norm.item())
+        final_text = wrapper.decode(adv_logits) if adv_logits is not None else ""
+        final_ctc = float(ctc_loss.item()) if ctc_loss is not None else float("nan")
+        final_l2 = float(l2_norm.item()) if l2_norm is not None else 0.0
 
-    success = (final_text.lower().strip() == target_phrase.lower().strip())
+    success = (not cancelled
+               and final_text.lower().strip() == target_phrase.lower().strip())
 
     adversarial_waveform = (input_values_orig + delta).detach()
 
@@ -187,5 +201,10 @@ def run_cw_attack_sync(
         "CW attack finished  id=%s  success=%s  final_text=%r  ctc=%.4f  l2=%.4f",
         attack_id, success, final_text, final_ctc, final_l2,
     )
+
+    # ── Explicit cleanup: release optimizer state & intermediate tensors ──
+    del optimizer, adv_input, adv_logits, log_probs, log_probs_ctc
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return adversarial_waveform, delta.detach(), results_dict

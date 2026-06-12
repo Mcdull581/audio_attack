@@ -30,7 +30,7 @@ export const useAttackStore = defineStore('attack', () => {
   // ── State ──────────────────────────────────────────────────────────────
 
   const attackId = ref<string | null>(null);
-  const status = ref<AttackStatus>('queued');
+  const status = ref<AttackStatus>('idle');
   const config = ref<AttackConfigIn | null>(null);
   const currentIteration = ref(0);
   const ctcLoss = ref(0);
@@ -133,7 +133,7 @@ export const useAttackStore = defineStore('attack', () => {
 
   function reset(): void {
     attackId.value = null;
-    status.value = 'queued';
+    status.value = 'idle';
     config.value = null;
     currentIteration.value = 0;
     ctcLoss.value = 0;

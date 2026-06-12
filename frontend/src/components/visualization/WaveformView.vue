@@ -1,68 +1,76 @@
 <template>
-  <div class="bg-dark-800 rounded-lg border border-dark-600 p-4">
-    <!-- Header row: play/pause + title -->
-    <div class="flex items-center gap-3 mb-3">
+  <div class="bg-dark-800 rounded-lg border border-dark-600">
+    <!-- Selected Sample Info Bar -->
+    <div
+      v-if="audioStore.selectedSample"
+      class="flex items-center gap-3 px-4 py-2.5 border-b border-dark-600 bg-dark-700/50"
+    >
+      <!-- Preview play button -->
       <button
-        class="flex items-center justify-center w-8 h-8 rounded-md transition-colors"
-        :class="
-          hasAudio
-            ? 'bg-dark-700 hover:bg-dark-600 text-gray-200 cursor-pointer'
-            : 'bg-dark-700/50 text-gray-600 cursor-not-allowed'
-        "
-        :disabled="!hasAudio"
-        :aria-label="isPlaying ? 'Pause' : 'Play'"
+        class="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-md transition-colors"
+        :class="isPlaying ? 'bg-accent-cyan text-dark-900' : 'bg-dark-600 hover:bg-dark-500 text-accent-cyan'"
+        :aria-label="isPlaying ? 'Pause' : 'Play preview'"
         @click="togglePlayback"
       >
-        <span class="text-sm leading-none">{{ isPlaying ? '⏸' : '▶' }}</span>
+        <span class="text-xs">{{ isPlaying ? '⏸' : '▶' }}</span>
       </button>
-      <span class="text-xs font-semibold text-gray-300 uppercase tracking-wider">
-        Waveform Comparison
+
+      <!-- Sample name + transcription -->
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-mono text-accent-cyan truncate">
+          {{ audioStore.selectedSample.name }}
+        </p>
+        <p
+          class="text-xs text-gray-400 truncate font-mono"
+          :title="audioStore.selectedSample.transcription || 'No transcription available'"
+        >
+          {{ audioStore.selectedSample.transcription || 'No transcription available' }}
+        </p>
+      </div>
+
+      <!-- Duration badge -->
+      <span class="flex-shrink-0 text-xs bg-dark-600 px-2 py-0.5 rounded font-mono text-gray-300">
+        {{ formatDuration(audioStore.selectedSample.duration_sec) }}
       </span>
     </div>
 
-    <!-- Empty state -->
+    <!-- No sample selected -->
     <div
-      v-if="!hasAudio"
-      class="flex flex-col items-center justify-center gap-2 py-10 text-gray-500"
+      v-else
+      class="flex items-center gap-3 px-4 py-2.5 border-b border-dark-600 bg-dark-700/50"
     >
-      <svg
-        class="w-10 h-10 opacity-40"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.5"
-      >
-        <path d="M3 12h2m4-8v16m4-14v12m4-10v8m4-4v0" stroke-linecap="round" />
-      </svg>
-      <span class="text-sm font-mono">No audio loaded</span>
+      <span class="text-xs text-gray-500 font-mono">
+        Select an audio sample to preview waveform
+      </span>
     </div>
 
-    <!-- Waveform containers -->
-    <template v-if="hasAudio">
-      <!-- Original -->
-      <div class="mb-2">
-        <span class="text-[10px] font-mono text-gray-400 uppercase tracking-wider">
-          Original
-        </span>
-        <div
-          id="waveform-original"
-          class="w-full rounded-sm overflow-hidden"
-          style="height: 90px"
-        ></div>
+    <!-- Waveform track: Original -->
+    <div class="p-4 pb-2">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-[11px] font-mono text-gray-400 uppercase tracking-wider">Original</span>
+        <span v-if="!hasOriginal" class="text-[10px] text-gray-500 font-mono">— waiting for selection</span>
       </div>
+      <div
+        id="waveform-original"
+        class="w-full rounded-sm overflow-hidden"
+        :class="hasOriginal ? 'opacity-100' : 'opacity-30'"
+        style="height: 90px"
+      ></div>
+    </div>
 
-      <!-- Adversarial -->
-      <div>
-        <span class="text-[10px] font-mono text-red-400 uppercase tracking-wider">
-          Adversarial
-        </span>
-        <div
-          id="waveform-adversarial"
-          class="w-full rounded-sm overflow-hidden"
-          style="height: 90px"
-        ></div>
+    <!-- Waveform track: Adversarial -->
+    <div class="px-4 pb-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-[11px] font-mono text-red-400 uppercase tracking-wider">Adversarial</span>
+        <span v-if="!hasAdversarial" class="text-[10px] text-gray-500 font-mono">— appears after attack completes</span>
       </div>
-    </template>
+      <div
+        id="waveform-adversarial"
+        class="w-full rounded-sm overflow-hidden"
+        :class="hasAdversarial ? 'opacity-100' : 'opacity-30'"
+        style="height: 90px"
+      ></div>
+    </div>
   </div>
 </template>
 
@@ -75,14 +83,19 @@ const audioStore = useAudioStore()
 const { initWaveforms, loadOriginal, loadAdversarial, playBoth, pauseBoth, destroy, isReady, isPlaying } =
   useAudioPlayer()
 
-// ── Derived state ────────────────────────────────────────────────────────
+// ── Split audio state ─────────────────────────────────────────────────
+const hasOriginal = computed(() => !!audioStore.originalUrl)
+const hasAdversarial = computed(() => !!audioStore.adversarialUrl)
 
-const hasAudio = computed(() => !!audioStore.originalUrl && !!audioStore.adversarialUrl)
+// ── Helpers ───────────────────────────────────────────────────────────
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
 
-// ── Playback toggle ──────────────────────────────────────────────────────
-
+// ── Playback ──────────────────────────────────────────────────────────
 function togglePlayback(): void {
-  if (!hasAudio.value) return
   if (isPlaying.value) {
     pauseBoth()
   } else {
@@ -90,14 +103,12 @@ function togglePlayback(): void {
   }
 }
 
-// ── Initialize wavesurfer on mount ───────────────────────────────────────
-
+// ── Initialize wavesurfer ─────────────────────────────────────────────
 onMounted(() => {
   initWaveforms('#waveform-original', '#waveform-adversarial')
 })
 
-// ── Load audio when URLs change ──────────────────────────────────────────
-
+// ── Watch: load original when sample selected ─────────────────────────
 watch(
   () => audioStore.originalUrl,
   (url) => {
@@ -105,8 +116,10 @@ watch(
       loadOriginal(url)
     }
   },
+  { immediate: false },
 )
 
+// ── Watch: load adversarial when attack completes ─────────────────────
 watch(
   () => audioStore.adversarialUrl,
   (url) => {
@@ -114,10 +127,10 @@ watch(
       loadAdversarial(url)
     }
   },
+  { immediate: false },
 )
 
-// ── Cleanup on unmount ───────────────────────────────────────────────────
-
+// ── Cleanup ───────────────────────────────────────────────────────────
 onUnmounted(() => {
   destroy()
 })

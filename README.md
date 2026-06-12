@@ -169,7 +169,7 @@ pip install -r requirements.txt
 python -c "from app.engine.model import Wav2Vec2Wrapper; Wav2Vec2Wrapper()"
 
 # Start the server
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 28000 --reload
 ```
 
 ### Data Source
@@ -194,14 +194,14 @@ cd frontend
 # Install dependencies
 npm install
 
-# Start dev server (proxies /api and /ws to backend:8000)
+# Start dev server (proxies /api and /ws to backend:28000)
 npm run dev
 ```
 
 The Vite dev server auto-proxies:
-- `/api/*` → `http://localhost:8000`
-- `/ws/*` → `ws://localhost:8000` (WebSocket)
-- `/data/*` → `http://localhost:8000` (static wav files)
+- `/api/*` → `http://localhost:28000`
+- `/ws/*` → `ws://localhost:28000` (WebSocket)
+- `/data/*` → `http://localhost:28000` (static wav files)
 
 ### 4. Docker (Optional)
 
@@ -212,7 +212,7 @@ cd backend
 docker build -t audio-attack-lab .
 
 # Run with GPU passthrough
-docker run --gpus all -p 8000:8000 audio-attack-lab
+docker run --gpus all -p 28000:8000 audio-attack-lab
 ```
 
 ---
@@ -286,7 +286,7 @@ npm run dev
 ```
 
 > **常见问题**：
-> - 页面空白 → 确认后端已启动在 8000 端口
+> - 页面空白 → 确认后端已启动在 28000 端口
 > - 样本列表为空 → 点击 Sample List 顶部的 **"Preload Samples"** 按钮
 > - 样式错乱 → 确认已执行 `npm install`
 
@@ -550,6 +550,26 @@ Where:
 - Baevski et al. (2020). *wav2vec 2.0: A Framework for Self-Supervised Learning of Speech Representations.* NeurIPS.
 - Graves et al. (2006). *Connectionist Temporal Classification.* ICML.
 - Mozilla Common Voice. https://commonvoice.mozilla.org/
+
+---
+
+## Key Features
+
+| Feature | Detail |
+|---------|--------|
+| **优雅取消** | WebSocket 断开 → `threading.Event` 信号立即终止攻击循环，释放 GPU/CPU |
+| **显存清理** | 每次攻击结束后 `gc.collect()` + `torch.cuda.empty_cache()` 防止多次攻击累积 |
+| **本地音频** | 扫描 `backend/data/sampled/` 目录中的 `.mp3/.wav/.flac`，无需网络下载 |
+| **自动重采样** | `soundfile` + `torchaudio` 将所有音频自动转为 16kHz 单声道 |
+
+---
+
+## Build Verification
+
+| Layer | Command | Result |
+|-------|---------|--------|
+| Backend | `python -m py_compile` (16 files) | ✅ 0 errors |
+| Frontend | `npm run build` (vue-tsc + vite) | ✅ 0 errors |
 
 ---
 

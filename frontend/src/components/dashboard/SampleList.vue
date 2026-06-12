@@ -45,7 +45,7 @@
       <template v-else>
         <button
           v-for="sample in samples"
-          :key="sample.id"
+          :key="sample.name"
           class="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors border-l-2 hover:bg-dark-700"
           :class="[
             selectedSample?.name === sample.name
@@ -127,10 +127,15 @@ async function handlePreload(): Promise<void> {
 
 function handleSelect(sample: SampleInfo): void {
   audioStore.setSample(sample)
+  // Build correct URL: local_path is "sampled/filename.mp3" but /data already mounts to sampled/
+  const filename = sample.local_path.split('/').pop() || sample.local_path
+  audioStore.originalUrl = `/data/${filename}`
 }
 
 function handlePlay(sample: SampleInfo): void {
   audioStore.setSample(sample)
+  const filename = sample.local_path.split('/').pop() || sample.local_path
+  audioStore.originalUrl = `/data/${filename}`
 }
 
 onMounted(() => {

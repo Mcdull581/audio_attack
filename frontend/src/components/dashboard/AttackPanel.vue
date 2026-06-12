@@ -30,7 +30,7 @@
         <template v-if="selectedSample">
           <span class="text-accent-cyan">{{ selectedSample.name }}</span>
           <span class="text-gray-500 ml-2">
-            {{ formatDuration(selectedSample.duration) }}
+            {{ formatDuration(selectedSample.duration_sec) }}
           </span>
         </template>
         <template v-else>
