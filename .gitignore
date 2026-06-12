@@ -1,3 +1,12 @@
+# Audio data (keep manifest, ignore raw files)
+backend/data/sampled/*.mp3
+backend/data/sampled/*.wav
+backend/data/sampled/*.flac
+backend/data/sampled/*.ogg
+backend/data/adversarial/
+backend/data/delta/
+backend/data/original/
+
 # Python
 __pycache__/
 *.py[cod]

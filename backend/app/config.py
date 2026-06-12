@@ -26,8 +26,8 @@ DATASET_REVISION: Optional[str] = None  # pin to a specific commit if needed
 
 SAMPLE_RATE: int = 16000
 NUM_SAMPLES: int = 100
-MIN_DURATION_SEC: float = 3.0
-MAX_DURATION_SEC: float = 5.0
+MIN_DURATION_SEC: float = 1.0
+MAX_DURATION_SEC: float = 15.0
 
 # ── Attack Defaults ──────────────────────────────────────────────────────
 DEFAULT_EPSILON: float = 0.01

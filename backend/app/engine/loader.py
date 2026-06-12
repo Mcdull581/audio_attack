@@ -1,10 +1,9 @@
 """
-Streaming downloader for Mozilla Common Voice (English).
+Local audio file scanner — replaces HF streaming for offline testing.
 
-Downloads 100 short speech samples, preprocesses them, and caches the
-results as 16-bit PCM .wav files.  A ``samples_manifest.json`` file records
-metadata for every cached sample.  Subsequent calls are idempotent — if the
-manifest already exists the download is skipped entirely.
+Scans ``backend/data/sampled/`` for pre-placed audio files (.mp3 / .wav),
+reads their metadata via torchaudio, and generates ``samples_manifest.json``.
+No network required — works entirely with local files.
 """
 
 from __future__ import annotations
@@ -14,45 +13,27 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-import torch
-import torchaudio
-from datasets import load_dataset
+import soundfile as sf
 
-from ..config import (
-    DATA_DIR,
-    MAX_DURATION_SEC,
-    MIN_DURATION_SEC,
-    NUM_SAMPLES,
-    SAMPLE_RATE,
-)
-from .preprocess import normalize_audio, resample_if_needed, trim_to_duration
+from ..config import DATA_DIR, MAX_DURATION_SEC, MIN_DURATION_SEC
 
 logger = logging.getLogger(__name__)
 
 MANIFEST_PATH: Path = DATA_DIR.parent / "samples_manifest.json"
 
-
-def _duration_in_range(example: Dict[str, Any]) -> bool:
-    """Return ``True`` when the raw audio duration is within the target band."""
-    audio = example["audio"]
-    duration = len(audio["array"]) / audio["sampling_rate"]
-    return MIN_DURATION_SEC <= duration <= MAX_DURATION_SEC
+# Supported audio extensions (case-insensitive)
+_AUDIO_GLOBS = ("*.mp3", "*.wav", "*.flac", "*.ogg", "*.m4a")
 
 
 def prepare_samples() -> List[Dict[str, Any]]:
-    """Stream, preprocess, cache, and return sample metadata.
+    """Scan local audio files and generate manifest metadata.
 
-    On the first call the function streams the *Common Voice 25.0* English
-    test split, filters clips to ``[MIN_DURATION_SEC, MAX_DURATION_SEC]``,
-    takes ``NUM_SAMPLES`` entries, and for each one:
+    On the first call the function scans ``DATA_DIR`` for audio files,
+    reads duration / sample rate via ``torchaudio.info()`` (header-only,
+    no full decode), optionally filters by duration, and writes
+    ``samples_manifest.json``.
 
-    * resamples to ``SAMPLE_RATE`` Hz
-    * trims to a high-energy segment
-    * peak-normalises to [-1, 1]
-    * saves a 16-bit PCM .wav under ``DATA_DIR``
-    * records metadata in ``samples_manifest.json``
-
-    If the manifest file already exists it is loaded and returned immediately
+    If the manifest already exists it is loaded and returned immediately
     (idempotent).
     """
     # ── Idempotent cache hit ───────────────────────────────────────────
@@ -63,88 +44,67 @@ def prepare_samples() -> List[Dict[str, Any]]:
         logger.info("Loaded %d samples from manifest", len(manifest))
         return manifest
 
-    # ── Stream & filter ────────────────────────────────────────────────
-    logger.info(
-        "Streaming %s/%s (split=%s) …",
-        "mozilla-foundation/common_voice_25_0",
-        "en",
-        "test",
-    )
-    ds = load_dataset(
-        "mozilla-foundation/common_voice_25_0",
-        "en",
-        split="test",
-        streaming=True,
-        trust_remote_code=True,
-    )
-
-    ds = ds.filter(_duration_in_range)
-    ds = ds.take(NUM_SAMPLES)
-
-    # ── Process every sample ───────────────────────────────────────────
+    # ── Scan local directory ───────────────────────────────────────────
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    audio_files: List[Path] = []
+    for glob_pattern in _AUDIO_GLOBS:
+        audio_files.extend(sorted(DATA_DIR.glob(glob_pattern)))
+
+    if not audio_files:
+        logger.warning(
+            "No audio files found in %s. Place .mp3/.wav files in this directory.",
+            DATA_DIR,
+        )
+        manifest: List[Dict[str, Any]] = []
+        with open(MANIFEST_PATH, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, indent=2, ensure_ascii=False)
+        return manifest
+
+    logger.info("Scanning %d local audio files in %s …", len(audio_files), DATA_DIR)
+
+    # ── Build manifest ────────────────────────────────────────────────
     manifest: List[Dict[str, Any]] = []
 
-    for idx, row in enumerate(ds, start=1):
-        name = f"cv_en_{idx:05d}"
-        audio_dict = row["audio"]
+    for idx, file_path in enumerate(audio_files, start=1):
+        try:
+            info = sf.info(str(file_path))
+        except Exception:
+            logger.warning("Skipping unreadable file: %s", file_path.name)
+            continue
 
-        # Extract raw numpy audio + metadata
-        audio_array = audio_dict["array"]
-        orig_sr: int = audio_dict["sampling_rate"]
-        transcription: str = row["sentence"]
+        duration_sec = info.duration
 
-        # Convert to torch tensor
-        waveform = torch.from_numpy(audio_array).float()
+        # Optional duration filter — include all if range covers everything
+        if not (MIN_DURATION_SEC <= duration_sec <= MAX_DURATION_SEC):
+            logger.debug(
+                "Skipping %s (%.2fs outside [%.1f, %.1f] range)",
+                file_path.name, duration_sec, MIN_DURATION_SEC, MAX_DURATION_SEC,
+            )
+            continue
 
-        # Preprocessing pipeline
-        waveform = resample_if_needed(waveform, orig_sr, SAMPLE_RATE)
-        waveform = trim_to_duration(
-            waveform, SAMPLE_RATE, MIN_DURATION_SEC, MAX_DURATION_SEC
-        )
-        waveform = normalize_audio(waveform)
-
-        # Compute duration from final tensor shape
-        num_samples = waveform.shape[0] if waveform.dim() == 1 else waveform.shape[-1]
-        duration_sec = num_samples / SAMPLE_RATE
-
-        # torchaudio.save expects (channels, samples)
-        if waveform.dim() == 1:
-            waveform = waveform.unsqueeze(0)
-
-        wav_filename = f"{name}.wav"
-        wav_path = DATA_DIR / wav_filename
-        torchaudio.save(
-            str(wav_path),
-            waveform,
-            SAMPLE_RATE,
-            encoding="PCM_S",
-            bits_per_sample=16,
-        )
+        # Derive name from filename (strip extension)
+        name = file_path.stem  # e.g. "common_voice_en_1"
+        # Build relative path from DATA_DIR
+        rel_path = f"sampled/{file_path.name}"
 
         entry: Dict[str, Any] = {
             "name": name,
-            "local_path": f"sampled/{wav_filename}",
+            "local_path": rel_path,
             "duration_sec": round(duration_sec, 2),
-            "transcription": transcription,
+            "transcription": "",  # no transcription for local files
         }
         manifest.append(entry)
 
-        logger.info(
-            "[%03d/%d]  %s  (%.2f s)  %s",
-            idx,
-            NUM_SAMPLES,
-            name,
-            duration_sec,
-            transcription[:80],
-        )
+        if idx % 50 == 0:
+            logger.info("[%d/%d] scanned …", len(manifest), len(audio_files))
 
     # ── Write manifest ─────────────────────────────────────────────────
     with open(MANIFEST_PATH, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2, ensure_ascii=False)
 
     logger.info(
-        "Wrote manifest with %d entries to %s", len(manifest), MANIFEST_PATH
+        "Wrote manifest with %d entries to %s (%d files skipped)",
+        len(manifest), MANIFEST_PATH, len(audio_files) - len(manifest),
     )
     return manifest
 

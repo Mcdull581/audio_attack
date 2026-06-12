@@ -75,8 +75,9 @@ def run_cw_attack_sync(
     device = wrapper.device
 
     # ── normalise waveform shape ───────────────────────────────────────
-    if waveform.dim() == 1:
-        waveform = waveform.unsqueeze(0)  # → (1, T)
+    # Keep waveform 1D — the processor handles batch-dim internally.
+    if waveform.dim() > 1:
+        waveform = waveform.squeeze(0)
 
     waveform = waveform.to(device)
 
