@@ -37,3 +37,10 @@ export async function getAttackStatus(
 export async function preloadSamples(): Promise<void> {
   await apiClient.post('/samples/preload')
 }
+
+export async function transcribeSample(name: string): Promise<string> {
+  const { data } = await apiClient.get<{ transcription: string }>(
+    `/samples/${encodeURIComponent(name)}/transcribe`,
+  )
+  return data.transcription
+}

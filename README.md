@@ -506,6 +506,7 @@ Where:
 |--------|------|-------------|
 | `GET` | `/api/samples` | 列出所有缓存的音频样本 |
 | `POST` | `/api/samples/preload` | 触发数据集下载 |
+| `GET` | `/api/samples/{name}/transcribe` | 模型推理获取音频真实转录 |
 | `POST` | `/api/attack/start` | 创建 AttackJob（不立即执行） |
 | `GET` | `/api/attack/{id}/status` | 查询攻击状态 |
 | `GET` | `/api/audio/download/{type}/{filename}` | 下载 wav（original/adversarial/delta）|
@@ -561,6 +562,10 @@ Where:
 | **显存清理** | 每次攻击结束后 `gc.collect()` + `torch.cuda.empty_cache()` 防止多次攻击累积 |
 | **本地音频** | 扫描 `backend/data/sampled/` 目录中的 `.mp3/.wav/.flac`，无需网络下载 |
 | **自动重采样** | `soundfile` + `torchaudio` 将所有音频自动转为 16kHz 单声道 |
+| **Ground Truth 转录** | 选中样本时自动调用模型推理获取真实文本标签，显示在波形信息栏 |
+| **双轨频谱图** | wavesurfer.js Spectrogram 插件 — 原始 vs 对抗频谱上下对比，高频噪点肉眼可见 |
+| **Sync Scale 开关** | 对抗波形旁一键切换 `normalize`，直观对比扰动幅度 |
+| **实时转录大屏** | `TranscriptionHero` — 大字等宽字体实时显示识别收敛过程，SNR 颜色徽章 |
 
 ---
 

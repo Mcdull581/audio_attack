@@ -25,7 +25,9 @@ from ..config import (
     DATA_DIR,
 )
 from ..engine.loader import preload_dataset
+from ..utils.audio_io import load_wav
 from .ws import attack_jobs
+from fastapi import Request
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,37 @@ async def preload_samples() -> dict:
     except Exception as exc:
         logger.exception("Preload failed")
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/samples/{sample_name}/transcribe")
+async def transcribe_sample(sample_name: str, request: Request) -> dict:
+    """Run inference on a sample and return its transcription."""
+    raw_samples, _ = _read_manifest()
+    matched = [s for s in raw_samples if s.get("name") == sample_name]
+    if not matched:
+        raise HTTPException(status_code=404, detail=f"Sample {sample_name!r} not found")
+
+    sample = matched[0]
+    wav_path = DATA_DIR.parent / sample["local_path"]
+
+    try:
+        waveform, sr = load_wav(str(wav_path))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load audio: {e}")
+
+    wrapper = request.app.state.wav2vec2_wrapper
+    encoded = wrapper.encode(waveform, sample_rate=sr)
+    logits = wrapper.get_logits(encoded["input_values"])
+    transcription = wrapper.decode(logits)
+
+    # Cache in manifest
+    sample["transcription"] = transcription
+    manifest_path = _read_manifest()[1]
+    if manifest_path:
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(raw_samples, f, indent=2, ensure_ascii=False)
+
+    return {"name": sample_name, "transcription": transcription}
 
 
 # ── Attack endpoints ────────────────────────────────────────────────────────
