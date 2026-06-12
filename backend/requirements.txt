@@ -1,0 +1,21 @@
+# Audio Adversarial Attack Lab - Backend Dependencies
+# CUDA 12.x compatible; install with: pip install -r requirements.txt
+
+# ── Core ML ────────────────────────────────────────────────────────────────
+torch>=2.3.0,<2.5.0
+torchaudio>=2.3.0,<2.5.0
+transformers>=4.40.0,<4.45.0
+datasets>=2.19.0,<3.0.0
+
+# ── Web Server ─────────────────────────────────────────────────────────────
+fastapi>=0.111.0,<0.115.0
+uvicorn[standard]>=0.29.0,<0.32.0
+python-multipart>=0.0.9
+
+# ── Utilities ──────────────────────────────────────────────────────────────
+pydantic>=2.7.0,<3.0.0
+aiofiles>=23.2.0
+numpy>=1.26.0,<2.0.0
+
+# ── Audio I/O fallback ─────────────────────────────────────────────────────
+soundfile>=0.12.1
