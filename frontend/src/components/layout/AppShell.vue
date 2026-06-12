@@ -31,7 +31,7 @@
       </div>
 
       <!-- Spectrogram -->
-      <div class="flex-1 min-h-0 bg-dark-900 mt-8">
+      <div class="flex-1 min-h-0 min-w-0 overflow-hidden bg-dark-900 mt-8">
         <SpectrogramView />
       </div>
     </div>
