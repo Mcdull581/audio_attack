@@ -61,7 +61,7 @@ function buildBaseOption(): echarts.EChartOption {
   return {
     backgroundColor: 'transparent',
     textStyle: { color: '#9ca3af' },
-    grid: { top: 40, right: 30, bottom: 40, left: 40, containLabel: true },
+    grid: { top: 30, right: 30, bottom: 60, left: 50, containLabel: true },
     xAxis: {
       type: 'value',
       name: 'Iteration',

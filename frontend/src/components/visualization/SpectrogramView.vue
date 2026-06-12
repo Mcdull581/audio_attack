@@ -48,10 +48,7 @@ function createSpecOnly(container: string): WaveSurfer {
     barGap: 0,
     plugins: [
       Spectrogram.create({
-        labels: true,
-        labelsBackground: '#0a0a0f',
-        labelsColor: '#6b7280',
-        labelsHzColor: '#9ca3af',
+        labels: false,
         height: 200,
         splitChannels: false,
         fftSamples: 1024,
@@ -91,7 +88,15 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* Force spectrogram canvases to transparent — kill the white blocks */
+/* Force spectrogram canvases to transparent — kill white blocks */
+:deep(.wavesurfer-spectrogram),
+:deep(spectrogram) {
+  background-color: transparent !important;
+}
+:deep(.wavesurfer-spectrogram canvas) {
+  background-color: transparent !important;
+  display: block;
+}
 #spec-original canvas,
 #spec-adversarial canvas,
 #spec-original :deep(canvas),

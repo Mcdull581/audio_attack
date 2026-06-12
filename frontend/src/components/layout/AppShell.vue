@@ -26,12 +26,12 @@
       </div>
 
       <!-- Loss Curve (h-72 max) -->
-      <div class="h-72 flex-shrink-0 border-b border-dark-600 bg-dark-900 pb-2">
+      <div class="h-72 flex-shrink-0 border-b border-dark-600 bg-dark-900 pb-2 mb-12">
         <LossCurve />
       </div>
 
       <!-- Spectrogram -->
-      <div class="flex-1 min-h-0 bg-dark-900 pt-2">
+      <div class="flex-1 min-h-0 bg-dark-900 mt-8">
         <SpectrogramView />
       </div>
     </div>
