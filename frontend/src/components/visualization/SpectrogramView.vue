@@ -49,7 +49,7 @@ function createSpecOnly(container: string): WaveSurfer {
     plugins: [
       Spectrogram.create({
         labels: true,
-        labelsBackground: '#12121a',
+        labelsBackground: '#0a0a0f',
         labelsColor: '#6b7280',
         labelsHzColor: '#9ca3af',
         height: 200,
@@ -89,3 +89,13 @@ onUnmounted(() => {
   adversarialWs?.destroy()
 })
 </script>
+
+<style scoped>
+/* Force spectrogram canvases to transparent — kill the white blocks */
+#spec-original canvas,
+#spec-adversarial canvas,
+#spec-original :deep(canvas),
+#spec-adversarial :deep(canvas) {
+  background-color: transparent !important;
+}
+</style>
