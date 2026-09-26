@@ -32,13 +32,14 @@
 │  └──────┬──────┘  └──────┬───────┘  └───────────┬────────────┘ │
 │         │                │                       │              │
 │  ┌──────┴────────────────┴───────────────────────┴────────────┐ │
-│  │                    CW Attack Engine                         │ │
+│  │                 PGD Attack Engine                          │ │
 │  │  ┌──────────────┐  ┌────────────┐  ┌────────────────────┐  │ │
-│  │  │ Wav2Vec2     │  │ Adam Opt   │  │ CTC Loss + L2 Norm │  │ │
-│  │  │ (frozen)     │  │ on δ       │  │ δ ∈ [-ε, ε]       │  │ │
+│  │  │ Wav2Vec2     │  │ Momentum   │  │ CTC Loss + L2 Norm │  │ │
+│  │  │ (frozen)     │  │ PGD +      │  │ δ ∈ [-ε, ε]       │  │ │
+│  │  │              │  │ restarts   │  │ best checkpoint    │  │ │
 │  │  └──────────────┘  └────────────┘  └────────────────────┘  │ │
 │  │                                                             │ │
-│  │  Data Pipeline: HF datasets (streaming) → 100 clips → wav  │ │
+│  │  Data Pipeline: local sampled audio → manifest cache          │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -66,7 +67,7 @@
 | **Backend** | FastAPI + Uvicorn | ≥0.111 |
 | **ML** | PyTorch 2.3 + torchaudio + HuggingFace transformers | ≥2.3 |
 | **Target Model** | `facebook/wav2vec2-base-960h` (Wav2Vec2ForCTC) | HF |
-| **Dataset** | `mozilla-foundation/common_voice_25_0` (en, test) | HF streaming |
+| **Dataset** | `backend/data/sampled/` local audio | offline manifest scan |
 | **GPU** | CUDA 12.4 (RTX 5070 Ti / compatible) | — |
 | **Container** | Docker (nvidia/cuda:12.4.0-runtime-ubuntu22.04) | — |
 
@@ -91,15 +92,15 @@ audio_attack/
 │   │   │   └── websocket_manager.py  # ConnectionManager（WS 连接生命周期）
 │   │   ├── engine/
 │   │   │   ├── model.py              # Wav2Vec2Wrapper（冻结权重、encode/decode/logits）
-│   │   │   ├── attack.py             # run_cw_attack_sync（CW 攻击核心循环）
-│   │   │   ├── optimizer.py          # Adam 优化器 + clamp + SNR 计算
-│   │   │   ├── loader.py             # HF datasets 流式加载 → 100 条 wav 落盘
-│   │   │   └── preprocess.py         # 重采样(16kHz)、能量裁剪(3-5s)、归一化
+│   │   │   ├── attack.py             # run_cw_attack_sync（PGD + 动量 + 重启）
+│   │   │   ├── optimizer.py          # clamp + SNR 计算
+│   │   │   ├── loader.py             # 本地音频扫描 → manifest
+│   │   │   └── preprocess.py         # 重采样(16kHz)、能量裁剪、归一化
 │   │   └── utils/
 │   │       ├── audio_io.py           # torchaudio wav 读写
 │   │       └── tensor_logger.py      # 张量序列化
 │   ├── data/
-│   │   └── sampled/                  # 100 条采样的 16kHz wav 文件 (.gitignore)
+│   │   └── sampled/                  # 本地音频文件（运行时扫描）
 │   └── tests/
 └── frontend/
     ├── index.html
@@ -152,20 +153,16 @@ audio_attack/
 - Node.js 18+ & npm
 - (Optional) Docker + nvidia-container-toolkit
 
-### 2. Backend Setup
+### 2. Backend Setup (Anaconda)
 
 ```bash
+conda env create -f environment.yml
+conda activate audio-attack
 cd backend
 
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# .venv\Scripts\activate   # Windows
 
-# Install dependencies (CUDA 12.x torch)
-pip install -r requirements.txt
-
-# Pre-download the model (first run will fetch ~360MB)
+# The model loader uses the local Hugging Face cache by default.
+# Set AUDIO_ATTACK_LOCAL_ONLY=0 only when a model download is intended.
 python -c "from app.engine.model import Wav2Vec2Wrapper; Wav2Vec2Wrapper()"
 
 # Start the server
@@ -180,8 +177,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 28000 --reload
 ```bash
 # 将你的 Common Voice 音频文件放入此目录
 cp /path/to/common_voice_*.mp3 backend/data/sampled/
-# 删除旧 manifest 以触发重新扫描
-rm backend/data/samples_manifest.json
+# 强制重新扫描（保留已有转录）
+curl -X POST http://localhost:28000/api/samples/preload
 ```
 
 启动后服务会自动发现所有符合条件的音频文件（时长 1-15 秒），无需网络连接或 HuggingFace 下载。
@@ -212,7 +209,7 @@ cd backend
 docker build -t audio-attack-lab .
 
 # Run with GPU passthrough
-docker run --gpus all -p 28000:8000 audio-attack-lab
+docker run --gpus all -p 28000:28000 audio-attack-lab
 ```
 
 ---
@@ -225,8 +222,8 @@ docker run --gpus all -p 28000:8000 audio-attack-lab
 
 ```bash
 cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+conda activate audio-attack
+uvicorn app.main:app --host 0.0.0.0 --port 28000
 ```
 
 终端输出关键日志：
@@ -234,19 +231,19 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 Loading Wav2Vec2ForCTC facebook/wav2vec2-base-960h → cuda
 Wav2Vec2Wrapper ready (params frozen, eval mode)
-Streaming mozilla-foundation/common_voice_25_0/en (split=test) …
-[001/100] cv_en_00001 (3.45 s) the quick brown fox jumps over the lazy dog
+Scanning local audio files in backend/data/sampled …
+[001/246] common_voice_en_1 (2.40 s)
 ...
-Wrote manifest with 100 entries to backend/data/samples_manifest.json
+Wrote manifest with 246 entries to backend/data/samples_manifest.json
 ```
 
-> **首次启动说明**：模型下载约 360 MB，数据集流式抽取约 1-3 分钟。后续启动跳过下载，直接加载 manifest 缓存。
+> **首次启动说明**：默认只读取本地 Hugging Face 模型缓存，不会启动时反复联网；如果缓存不存在，请先设置 `AUDIO_ATTACK_LOCAL_ONLY=0` 后手动下载模型。样本目录启动时会快速扫描并生成 manifest。
 >
 > **Windows 用户**：若遇 `ModuleNotFoundError: No module named 'app'`，确认终端工作目录为 `backend/`，或使用：
 > ```powershell
-> cd C:\Users\Administrator\Desktop\audio_attack\backend
+> cd C:\Users\Administrator\Desktop\token开发证明\audio_attack\backend
 > $env:PYTHONPATH = "."
-> uvicorn app.main:app --host 0.0.0.0 --port 8000
+> uvicorn app.main:app --host 0.0.0.0 --port 28000
 > ```
 
 ### Step 1 — 启动前端
@@ -295,7 +292,7 @@ npm run dev
 在左侧 **Sample List** 面板中：
 
 1. 等待样本列表加载（首次启动会自动 `GET /api/samples`）
-2. 浏览 100 条语音，每条显示：
+2. 浏览本地样本列表，每条显示：
    - 样本名（如 `cv_en_00042`）
    - 转录文本预览（如 "the weather forecast..."）
    - 时长标签（如 `0:03` = 3 秒）
@@ -311,13 +308,16 @@ npm run dev
 | 参数 | 说明 | 推荐值 | 何时调整 |
 |------|------|--------|---------|
 | **Target Phrase** | 想让模型"听成"的文本 | `hello world` | 每次实验必填 |
-| **Epsilon (ε)** | 扰动强度上限（L∞ 范数） | `0.01` | 攻击不收敛 → 增大至 0.02；扰动太明显（SNR 过低）→ 减小至 0.005 |
-| **Max Iterations** | 最大优化步数 | `1000` | 500 步足够短文本收敛；长短语需要 2000+ |
-| **Lambda L2 (λ)** | L2 正则化权重 | `0.1` | 扰动幅度过大 → 增大 λ；CTC Loss 降不下来 → 减小 λ |
+| **Epsilon (ε)** | 扰动强度上限（L∞ 范数） | `0.02` | 攻击不收敛 → 增大；扰动太明显（SNR 过低）→ 减小 |
+| **Max Iterations / Restart** | 每次重启的 PGD 步数 | `1000` | 长目标可增加到 2000+ |
+| **Lambda L2 (λ)** | L2 正则化权重 | `0.02` | 扰动幅度过大 → 增大；CTC Loss 降不下来 → 减小 |
+| **Momentum** | 梯度动量系数 | `0.9` | 一般保持 0.8～0.95 |
+| **Random Restarts** | 零初始化 + 随机初始化次数 | `3` | 提高跳出局部最优的概率 |
 
 **参数调优经验**：
-- ε = 0.01, λ = 0.1 是论文的默认组合，适用于大多数 3-5 秒语音
-- 攻击失败时优先增加 max_iterations，其次增大 ε
+- 默认策略为定向 PGD + 动量 + 3 次重启，第一轮为零初始化，后续为随机初始化
+- 每次更新后都投影回 `[-ε, ε]`，并保存当前最佳候选
+- 一旦贪心解码与目标完全一致就提前停止
 - SNR < 10 dB 时人耳可察觉扰动，建议 SNR > 20 dB
 
 ### Step 4 — 启动攻击
@@ -388,7 +388,7 @@ Iter 500:  "hello world"         →  "hello world"   (ctc=0.23, l2=0.12) ← �
 
 | 症状 | 可能原因 | 解决方案 |
 |------|---------|---------|
-| 样本列表为空 | manifest 未生成 | 点击 "Preload Samples"；检查后端日志是否有 HF 网络错误 |
+| 样本列表为空 | manifest 未生成或音频不在时长范围 | 点击 "Preload Samples"；检查 `backend/data/sampled/` 和后端日志 |
 | "Start Attack" 灰色不可点击 | 未选择样本或未输入目标短语 | 先点击 Sample List 中的条目，填写 Target Phrase |
 | 攻击启动后立即 "Failed" | GPU OOM 或 CUDA 错误 | 检查 `nvidia-smi`；关闭其他 GPU 进程；重启后端 |
 | CTC Loss 不下降 | 学习率不合适或目标短语无意义 | 尝试 `lr=1e-3`；确保目标短语由常见英文单词组成 |
@@ -418,7 +418,7 @@ adv, delta, results = run_cw_attack_sync(
     sample_rate=sr,
     target_phrase="hello world",
     wrapper=wrapper,
-    config_dict={"epsilon": 0.01, "max_iterations": 500, "lambda_l2": 0.1, "learning_rate": 5e-4, "attack_id": "cli"},
+    config_dict={"epsilon": 0.02, "max_iterations": 1000, "lambda_l2": 0.02, "learning_rate": 1e-3, "momentum": 0.9, "restarts": 3, "attack_id": "cli"},
     progress_callback=progress_cb,
 )
 
@@ -477,7 +477,7 @@ python run_attack.py
 
 ## Attack Algorithm
 
-实现的是 **Carlini & Wagner (2018)** 针对 CTC-based ASR 的白盒定向攻击：
+实现的是针对 CTC-based ASR 的白盒定向 PGD 攻击，借鉴 Carlini & Wagner (2018) 的目标函数：
 
 ```
 Minimize:  CTC_Loss(f(x + δ), y_target) + λ · ‖δ‖₂
@@ -492,8 +492,10 @@ Where:
   λ      = L2 regularization weight
 ```
 
-**优化器**: Adam on δ, learning rate = 5e-4
+**优化器**: Momentum PGD on δ, normalized gradient, step size = 1e-3
+**多次重启**: 1 次零初始化 + 默认 2 次随机初始化
 **约束投影**: 每步后 `clamp(δ, -ε, ε)`
+**候选选择**: 优先精确匹配，其次字符编辑距离，最后 CTC Loss
 **收敛判断**: `decode(argmax(logits)) == target_phrase`
 
 ---
@@ -505,10 +507,11 @@ Where:
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/samples` | 列出所有缓存的音频样本 |
-| `POST` | `/api/samples/preload` | 触发数据集下载 |
+| `POST` | `/api/samples/preload` | 强制重新扫描本地音频并更新 manifest（保留已有转录） |
 | `GET` | `/api/samples/{name}/transcribe` | 模型推理获取音频真实转录 |
 | `POST` | `/api/attack/start` | 创建 AttackJob（不立即执行） |
 | `GET` | `/api/attack/{id}/status` | 查询攻击状态 |
+| `POST` | `/api/attack/{id}/cancel` | 协作式取消运行中的攻击 |
 | `GET` | `/api/audio/download/{type}/{filename}` | 下载 wav（original/adversarial/delta）|
 
 ### WebSocket Protocol
@@ -516,7 +519,7 @@ Where:
 | Message Type | Direction | Trigger | Payload |
 |-------------|-----------|---------|---------|
 | `attack_started` | S→C | WS 连接建立 | config, original_transcription, audio_duration_sec |
-| `iteration_progress` | S→C | 每 200 次迭代 | iteration, ctc_loss, l2_loss, snr_db, current_transcription |
+| `iteration_progress` | S→C | 按全局预算推送 | iteration, restart_index, ctc_loss, l2_loss, snr_db, current_transcription |
 | `attack_complete` | S→C | 收敛或达到 max_iter | success, final_transcription, resource URLs |
 | `attack_error` | S→C | 异常中断 | error_code, message |
 
@@ -530,13 +533,15 @@ Where:
 |------|--------|------|
 | `MODEL_NAME` | `facebook/wav2vec2-base-960h` | 靶机模型 |
 | `SAMPLE_RATE` | 16000 | 音频采样率 |
-| `NUM_SAMPLES` | 100 | 预加载样本数量 |
-| `MIN_DURATION_SEC` | 3.0 | 最短音频时长 |
-| `MAX_DURATION_SEC` | 5.0 | 最长音频时长 |
-| `DEFAULT_EPSILON` | 0.01 | 扰动预算 |
+| `NUM_SAMPLES` | — | 兼容保留；本地扫描器不再截断样本 |
+| `MIN_DURATION_SEC` | 1.0 | 最短音频时长 |
+| `MAX_DURATION_SEC` | 15.0 | 最长音频时长 |
+| `DEFAULT_EPSILON` | 0.02 | 扰动预算 |
 | `DEFAULT_MAX_ITER` | 1000 | 最大迭代次数 |
-| `DEFAULT_LAMBDA_L2` | 0.1 | L2 正则化权重 |
-| `DEFAULT_LEARNING_RATE` | 5e-4 | Adam 学习率 |
+| `DEFAULT_LAMBDA_L2` | 0.02 | L2 正则化权重 |
+| `DEFAULT_LEARNING_RATE` | 1e-3 | PGD 步长 |
+| `DEFAULT_MOMENTUM` | 0.9 | 动量系数 |
+| `DEFAULT_RESTARTS` | 3 | 初始化次数 |
 
 ---
 

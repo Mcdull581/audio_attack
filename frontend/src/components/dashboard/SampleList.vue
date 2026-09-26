@@ -84,6 +84,7 @@ async function loadSamples(): Promise<void> {
 }
 
 function handleSelect(sample: SampleInfo): void {
+  audioStore.clearAttackResults()
   audioStore.setSample(sample)
   const filename = sample.local_path.split('/').pop() || sample.local_path
   audioStore.originalUrl = `/data/${filename}`
@@ -97,6 +98,7 @@ function handleSelect(sample: SampleInfo): void {
 }
 
 function handlePlay(sample: SampleInfo): void {
+  audioStore.clearAttackResults()
   audioStore.setSample(sample)
   const filename = sample.local_path.split('/').pop() || sample.local_path
   audioStore.originalUrl = `/data/${filename}`

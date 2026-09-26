@@ -4,6 +4,10 @@
       Attack Configuration
     </h3>
 
+    <div class="mb-4 px-3 py-2 rounded bg-accent-cyan/5 border border-accent-cyan/20 text-xs text-accent-cyan font-mono">
+      Method: targeted PGD + momentum · multi-start
+    </div>
+
     <!-- Target Phrase -->
     <div class="mb-4">
       <label class="block text-xs text-gray-500 font-mono mb-1.5">
@@ -71,7 +75,7 @@
     <!-- Max Iterations -->
     <div class="mb-4">
       <label class="block text-xs text-gray-500 font-mono mb-1.5">
-        Max Iterations
+        Max Iterations / Restart
       </label>
       <input
         v-model.number="maxIterations"
@@ -100,6 +104,41 @@
       />
     </div>
 
+    <!-- Momentum -->
+    <div class="mb-4">
+      <label class="block text-xs text-gray-500 font-mono mb-1.5">
+        Momentum
+      </label>
+      <input
+        v-model.number="momentum"
+        type="number"
+        :min="0"
+        :max="0.99"
+        :step="0.05"
+        :disabled="isRunning"
+        class="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-accent-cyan disabled:opacity-50"
+      />
+    </div>
+
+    <!-- Random restarts -->
+    <div class="mb-5">
+      <label class="block text-xs text-gray-500 font-mono mb-1.5">
+        Random Restarts
+      </label>
+      <input
+        v-model.number="restarts"
+        type="number"
+        :min="1"
+        :max="8"
+        :step="1"
+        :disabled="isRunning"
+        class="w-full bg-dark-700 border border-dark-600 rounded px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-accent-cyan disabled:opacity-50"
+      />
+      <p class="mt-1 text-[10px] text-gray-500 font-mono">
+        Includes one zero start plus random starts; total budget = iterations × restarts.
+      </p>
+    </div>
+
     <!-- Action area -->
     <div>
       <!-- Idle: Start button -->
@@ -115,10 +154,18 @@
       <!-- Running -->
       <div
         v-else-if="status === 'running'"
-        class="flex items-center justify-center gap-2 py-3 text-accent-cyan font-mono text-sm"
+        class="flex items-center justify-between gap-2 py-2 text-accent-cyan font-mono text-sm"
       >
-        <span class="inline-block w-4 h-4 border-2 border-accent-cyan border-t-transparent rounded-full animate-spin" />
-        Attack Running...
+        <span class="flex items-center gap-2">
+          <span class="inline-block w-4 h-4 border-2 border-accent-cyan border-t-transparent rounded-full animate-spin" />
+          Attack Running...
+        </span>
+        <button
+          class="px-3 py-1 rounded border border-red-400/40 text-red-400 hover:bg-red-400/10 transition-colors"
+          @click="handleCancel"
+        >
+          Cancel
+        </button>
       </div>
 
       <!-- Queued -->
@@ -128,6 +175,19 @@
       >
         <span class="inline-block w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
         Queued...
+      </div>
+
+      <!-- Cancelled -->
+      <div v-else-if="status === 'cancelled'">
+        <div class="mb-3 px-3 py-2 rounded text-sm font-mono bg-yellow-400/10 border border-yellow-400/30 text-yellow-400">
+          Attack cancelled. You can start a new run with the current sample.
+        </div>
+        <button
+          class="w-full bg-accent-cyan hover:bg-cyan-500 text-dark-900 font-bold py-2 rounded font-mono text-sm transition-colors"
+          @click="handleReset"
+        >
+          New Attack
+        </button>
       </div>
 
       <!-- Completed -->
@@ -174,7 +234,7 @@ import { useAttack } from '@/composables/useAttack'
 
 const attackStore = useAttackStore()
 const audioStore = useAudioStore()
-const { startAttack } = useAttack()
+const { startAttack, abortAttack } = useAttack()
 
 const { status, error } = storeToRefs(attackStore)
 
@@ -182,9 +242,11 @@ const { selectedSample, adversarialUrl } = storeToRefs(audioStore)
 
 // Local form state — initialised from store config or defaults
 const targetPhrase = ref(attackStore.config?.target_phrase ?? '')
-const epsilon = ref(attackStore.config?.epsilon ?? 0.01)
+const epsilon = ref(attackStore.config?.epsilon ?? 0.02)
 const maxIterations = ref(attackStore.config?.max_iterations ?? 1000)
-const lambdaL2 = ref(attackStore.config?.lambda_l2 ?? 0.1)
+const lambdaL2 = ref(attackStore.config?.lambda_l2 ?? 0.02)
+const momentum = ref(attackStore.config?.momentum ?? 0.9)
+const restarts = ref(attackStore.config?.restarts ?? 3)
 
 const isRunning = computed(() => status.value === 'running' || status.value === 'queued')
 
@@ -205,16 +267,27 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function handleStart(): void {
+async function handleStart(): Promise<void> {
   if (!canStart.value) return
 
-  startAttack(
-    selectedSample.value!.name,
-    targetPhrase.value,
-    epsilon.value,
-    maxIterations.value,
-    lambdaL2.value,
-  )
+  try {
+    await startAttack(
+      selectedSample.value!.name,
+      targetPhrase.value,
+      epsilon.value,
+      maxIterations.value,
+      lambdaL2.value,
+      momentum.value,
+      restarts.value,
+    )
+  } catch (err) {
+    attackStore.error = err instanceof Error ? err.message : 'Failed to start attack'
+    attackStore.status = 'failed'
+  }
+}
+
+async function handleCancel(): Promise<void> {
+  await abortAttack()
 }
 
 function handleReset(): void {

@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Preload / cache dataset samples
     try:
         logger.info("Triggering sample preload…")
-        preload_dataset()
+        preload_dataset(force=True)
         logger.info("Sample preload complete.")
     except Exception:
         logger.exception("Sample preload failed — continuing anyway")

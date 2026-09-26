@@ -75,7 +75,7 @@ async def preload_samples() -> dict:
     """Trigger the dataset download / caching pipeline."""
     logger.info("Preload requested via REST")
     try:
-        preload_dataset()
+        preload_dataset(force=True)
         return {"status": "preloading", "message": "Dataset preload initiated."}
     except Exception as exc:
         logger.exception("Preload failed")
@@ -102,13 +102,6 @@ async def transcribe_sample(sample_name: str, request: Request) -> dict:
     encoded = wrapper.encode(waveform, sample_rate=sr)
     logits = wrapper.get_logits(encoded["input_values"])
     transcription = wrapper.decode(logits)
-
-    # Cache in manifest
-    sample["transcription"] = transcription
-    manifest_path = _read_manifest()[1]
-    if manifest_path:
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(raw_samples, f, indent=2, ensure_ascii=False)
 
     return {"name": sample_name, "transcription": transcription}
 
@@ -159,6 +152,19 @@ async def attack_status(attack_id: str) -> dict:
         "config": job.config.model_dump(),
         "original_transcription": job.original_transcription,
     }
+
+
+@router.post("/attack/{attack_id}/cancel")
+async def cancel_attack(attack_id: str) -> dict:
+    """Request cooperative cancellation of a running attack."""
+    job = attack_jobs.get(attack_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"No attack found for id={attack_id!r}")
+    if job.status in (AttackStatus.COMPLETED, AttackStatus.FAILED, AttackStatus.CANCELLED):
+        return {"attack_id": attack_id, "status": job.status.value}
+    job.cancel_event.set()
+    job.status = AttackStatus.CANCELLED
+    return {"attack_id": attack_id, "status": AttackStatus.CANCELLED.value}
 
 
 # ── Audio download ──────────────────────────────────────────────────────────

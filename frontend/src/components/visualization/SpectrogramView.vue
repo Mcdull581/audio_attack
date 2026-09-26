@@ -10,13 +10,13 @@
       <!-- Original Spectrogram -->
       <div class="flex-1 flex flex-col min-h-0">
         <span class="text-[10px] font-mono text-gray-400 uppercase tracking-wider px-4 pt-2 flex-shrink-0">Original</span>
-        <div id="spec-original" class="flex-1 w-full min-h-0 bg-[#0a0a0f] rounded-sm mx-4 my-1 overflow-hidden"></div>
+        <div id="spec-original" class="flex-1 w-[calc(100%-2rem)] min-h-0 bg-[#0a0a0f] rounded-sm mx-4 my-1 overflow-hidden"></div>
       </div>
 
       <!-- Adversarial Spectrogram -->
       <div class="flex-1 flex flex-col min-h-0">
         <span class="text-[10px] font-mono text-red-400 uppercase tracking-wider px-4 pt-2 flex-shrink-0">Adversarial</span>
-        <div id="spec-adversarial" class="flex-1 w-full min-h-0 bg-[#0a0a0f] rounded-sm mx-4 mb-2 overflow-hidden"></div>
+        <div id="spec-adversarial" class="flex-1 w-[calc(100%-2rem)] min-h-0 bg-[#0a0a0f] rounded-sm mx-4 mb-2 overflow-hidden"></div>
       </div>
     </div>
   </div>
@@ -26,7 +26,7 @@
 import { onMounted, onUnmounted, watch, ref } from 'vue'
 import { useAudioStore } from '@/stores/audioStore'
 import WaveSurfer from 'wavesurfer.js'
-import Spectrogram from 'wavesurfer.js/dist/plugins/spectrogram.js'
+import Spectrogram from 'wavesurfer.js/dist/plugins/spectrogram.esm.js'
 
 const audioStore = useAudioStore()
 
@@ -48,6 +48,7 @@ function createSpecOnly(container: string): WaveSurfer {
     barGap: 0,
     plugins: [
       Spectrogram.create({
+        useWebWorker: false,
         labels: false,
         height: 200,
         splitChannels: false,

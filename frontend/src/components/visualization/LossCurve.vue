@@ -38,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { useAttackStore } from '@/stores/attackStore'
 import type { LossDataPoint } from '@/types/attack'
@@ -197,8 +197,6 @@ let resizeObserver: ResizeObserver | null = null
 // ── Lifecycle ────────────────────────────────────────────────────────────
 
 onMounted(() => {
-  initChart()
-
   if (chartContainerRef.value) {
     resizeObserver = new ResizeObserver(() => {
       handleResize()
@@ -214,6 +212,13 @@ onMounted(() => {
 watch(
   () => attackStore.lossHistory.length,
   () => {
+    if (!chartInstance && hasData.value) {
+      void nextTick(() => {
+        initChart()
+        appendNewPoints()
+      })
+      return
+    }
     appendNewPoints()
   },
 )

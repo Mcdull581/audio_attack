@@ -25,16 +25,20 @@ interface StartAttackParams {
   epsilon?: number;
   maxIterations?: number;
   lambdaL2?: number;
+  momentum?: number;
+  restarts?: number;
 }
 
 function buildConfig(params: StartAttackParams): AttackConfigIn {
   return {
     sample_name: params.sampleName,
     target_phrase: params.targetPhrase,
-    epsilon: params.epsilon ?? 0.01,
+    epsilon: params.epsilon ?? 0.02,
     max_iterations: params.maxIterations ?? 1000,
-    lambda_l2: params.lambdaL2 ?? 0.1,
-    learning_rate: 5e-4,
+    lambda_l2: params.lambdaL2 ?? 0.02,
+    learning_rate: 1e-3,
+    momentum: params.momentum ?? 0.9,
+    restarts: params.restarts ?? 3,
   };
 }
 
@@ -76,6 +80,8 @@ export function useAttack() {
     epsilon?: number,
     maxIterations?: number,
     lambdaL2?: number,
+    momentum?: number,
+    restarts?: number,
   ): Promise<string> {
     // Prevent double-start
     if (attackStore.isRunning) {
@@ -88,11 +94,15 @@ export function useAttack() {
       epsilon,
       maxIterations,
       lambdaL2,
+      momentum,
+      restarts,
     });
 
     // Reset stores for a clean slate
     attackStore.reset();
-    audioStore.reset();
+    // Keep the selected sample and its original waveform visible while the
+    // new attack runs; only the previous attack outputs should be cleared.
+    audioStore.clearAttackResults();
     ws.disconnect();
 
     // Submit attack config to backend
@@ -137,7 +147,7 @@ export function useAttack() {
 
     ws.disconnect();
     attackStore.reset();
-    audioStore.reset();
+    audioStore.clearAttackResults();
     attackIdRef.value = null;
   }
 

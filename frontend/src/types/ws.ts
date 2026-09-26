@@ -27,6 +27,8 @@ export interface AttackConfig {
   max_iterations: number;
   lambda_l2: number;
   learning_rate: number;
+  momentum: number;
+  restarts: number;
 }
 
 export interface AttackStartedMsg extends WsEnvelope {
@@ -35,6 +37,7 @@ export interface AttackStartedMsg extends WsEnvelope {
   original_transcription: string;
   audio_duration_sec: number;
   push_interval: number;
+  total_iterations_budget: number;
 }
 
 // ── IterationProgress — pushed every push_interval iterations ────────────
@@ -50,6 +53,10 @@ export interface IterationProgressMsg extends WsEnvelope {
   current_transcription: string;
   target_transcription: string;
   timestamp: number;
+  restart_index: number;
+  restarts: number;
+  restart_iteration: number;
+  total_iterations_budget: number;
 }
 
 // ── AttackComplete — sent when attack converges or hits max_iter ─────────
@@ -68,6 +75,7 @@ export interface AttackCompleteMsg extends WsEnvelope {
   final_transcription: string;
   target_transcription: string;
   success: boolean;
+  cancelled?: boolean;
   resources: AttackResourceUrls;
 }
 

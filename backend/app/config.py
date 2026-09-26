@@ -1,5 +1,5 @@
 """
-Global configuration and shared type contracts for the CW attack lab.
+Global configuration and shared type contracts for the targeted PGD attack lab.
 All modules import from here to ensure interface consistency.
 """
 
@@ -8,7 +8,8 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Literal, Optional, TypedDict
+from typing import Dict, Literal, Optional, TypedDict, Union
+import threading
 
 import pydantic
 
@@ -25,15 +26,19 @@ DATASET_SPLIT: str = "test"
 DATASET_REVISION: Optional[str] = None  # pin to a specific commit if needed
 
 SAMPLE_RATE: int = 16000
-NUM_SAMPLES: int = 100
+# Kept for compatibility with older configs; local scanning now includes all
+# files that pass the duration filter instead of truncating to a fixed count.
+NUM_SAMPLES: int = 0
 MIN_DURATION_SEC: float = 1.0
 MAX_DURATION_SEC: float = 15.0
 
 # ── Attack Defaults ──────────────────────────────────────────────────────
-DEFAULT_EPSILON: float = 0.01
+DEFAULT_EPSILON: float = 0.02
 DEFAULT_MAX_ITER: int = 1000
-DEFAULT_LAMBDA_L2: float = 0.1
-DEFAULT_LEARNING_RATE: float = 5e-4
+DEFAULT_LAMBDA_L2: float = 0.02
+DEFAULT_LEARNING_RATE: float = 1e-3
+DEFAULT_MOMENTUM: float = 0.9
+DEFAULT_RESTARTS: int = 3
 
 # ── Computation device selection ─────────────────────────────────────────
 import torch
@@ -76,6 +81,8 @@ class AttackConfigIn(pydantic.BaseModel):
     max_iterations: int = DEFAULT_MAX_ITER
     lambda_l2: float = DEFAULT_LAMBDA_L2
     learning_rate: float = DEFAULT_LEARNING_RATE
+    momentum: float = DEFAULT_MOMENTUM
+    restarts: int = DEFAULT_RESTARTS
 
     @pydantic.field_validator("epsilon")
     @classmethod
@@ -90,6 +97,28 @@ class AttackConfigIn(pydantic.BaseModel):
         if v < 1:
             raise ValueError("max_iterations must be >= 1")
         return v
+
+    @pydantic.field_validator("learning_rate")
+    @classmethod
+    def learning_rate_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("learning_rate must be > 0")
+        return v
+
+    @pydantic.field_validator("momentum")
+    @classmethod
+    def momentum_in_range(cls, v: float) -> float:
+        if not 0 <= v < 1:
+            raise ValueError("momentum must be in [0, 1)")
+        return v
+
+    @pydantic.field_validator("restarts")
+    @classmethod
+    def restarts_in_range(cls, v: int) -> int:
+        if not 1 <= v <= 8:
+            raise ValueError("restarts must be between 1 and 8")
+        return v
+
 
     @pydantic.field_validator("target_phrase")
     @classmethod
@@ -141,6 +170,7 @@ class AttackStartedMsg(WsEnvelope):
     original_transcription: str
     audio_duration_sec: float
     push_interval: int
+    total_iterations_budget: int
 
 
 class IterationProgressMsg(WsEnvelope):
@@ -154,6 +184,10 @@ class IterationProgressMsg(WsEnvelope):
     current_transcription: str
     target_transcription: str
     timestamp: float  # time.monotonic() or time.time()
+    restart_index: int
+    restarts: int
+    restart_iteration: int
+    total_iterations_budget: int
 
 
 class AttackCompleteMsg(WsEnvelope):
@@ -164,6 +198,7 @@ class AttackCompleteMsg(WsEnvelope):
     final_transcription: str
     target_transcription: str
     success: bool
+    cancelled: bool
     resources: dict  # {"original_wav_url": ..., "adversarial_wav_url": ..., "perturbation_wav_url": ...}
 
 
@@ -175,7 +210,7 @@ class AttackErrorMsg(WsEnvelope):
 
 
 # Union for type-narrowing helpers
-WsMessage = AttackStartedMsg | IterationProgressMsg | AttackCompleteMsg | AttackErrorMsg
+WsMessage = Union[AttackStartedMsg, IterationProgressMsg, AttackCompleteMsg, AttackErrorMsg]
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -193,9 +228,10 @@ class AttackJob:
     adversarial_path: str = ""
     delta_path: str = ""
     iteration_history: list[dict] = field(default_factory=list)
+    cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
     def push_interval(self) -> int:
-        return max(1, self.config.max_iterations // 200)
+        return max(1, (self.config.max_iterations * self.config.restarts) // 200)
 
     def result_urls(self) -> dict:
         base = f"/api/audio/download"

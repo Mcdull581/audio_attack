@@ -1,6 +1,6 @@
 # Audio Adversarial Attack Lab
 
-**White-Box Adversarial Attack Visualization Lab** — Reproduction of Carlini & Wagner (2018) targeted attacks against `facebook/wav2vec2-base-960h` end-to-end speech recognition.
+**White-Box Adversarial Attack Visualization Lab** — Targeted PGD + momentum attacks against `facebook/wav2vec2-base-960h` end-to-end speech recognition, using the Carlini & Wagner (2018) CTC/L2 objective.
 
 Real-time visualization of gradient backpropagation via Web UI: iterative loss curves, waveform/spectrogram comparison, ASR transcription convergence.
 
@@ -28,8 +28,8 @@ Real-time visualization of gradient backpropagation via Web UI: iterative loss c
 │  └──────┬──────┘  └──────┬───────┘  └───────────┬────────────┘ │
 │         │                │                       │              │
 │  ┌──────┴────────────────┴───────────────────────┴────────────┐ │
-│  │                    CW Attack Engine                         │ │
-│  │  Wav2Vec2 (frozen) │ Adam on δ │ CTC Loss + L2 Norm        │ │
+│  │                   PGD Attack Engine                         │ │
+│  │  Wav2Vec2 (frozen) │ Momentum PGD │ CTC/L2 + restarts      │ │
 │  │  Data: local scan → 246 clips → 16kHz mono wav             │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────┘
@@ -65,20 +65,23 @@ Real-time visualization of gradient backpropagation via Web UI: iterative loss c
 
 ## Quick Start
 
-### 1. Backend
+### 1. Backend (Anaconda)
 
 ```bash
+conda env create -f environment.yml
+conda activate audio-attack
 cd backend
-pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 28000
 ```
+
+The model loader is local-cache-only by default. Set `AUDIO_ATTACK_LOCAL_ONLY=0` only when a model download is intended.
 
 The lifespan handler will:
 1. Load the Wav2Vec2 model into memory
 2. Scan `backend/data/sampled/` for local audio files
 3. Generate `samples_manifest.json`
 
-> Place your Common Voice `.mp3` files in `backend/data/sampled/`. Delete the manifest to trigger rescan.
+> Place audio files in `backend/data/sampled/`. Run `curl -X POST http://localhost:28000/api/samples/preload` to force a rescan while preserving existing transcriptions.
 
 ### 2. Frontend
 
@@ -98,7 +101,7 @@ The Vite dev server proxies:
 ```bash
 cd backend
 docker build -t audio-attack-lab .
-docker run --gpus all -p 28000:8000 audio-attack-lab
+docker run --gpus all -p 28000:28000 audio-attack-lab
 ```
 
 ---
@@ -116,15 +119,18 @@ docker run --gpus all -p 28000:8000 audio-attack-lab
 
 ## Attack Algorithm
 
-Carlini & Wagner (2018) targeted attack for CTC-based ASR:
+Targeted momentum-PGD attack for CTC-based ASR:
 
 ```
 Minimize:  CTC_Loss(f(x + δ), y_target) + λ · ‖δ‖₂
 Subject to: ‖δ‖∞ ≤ ε
 ```
 
-- **Optimizer**: Adam on δ, lr = 5e-4
+- **Optimizer**: normalized-gradient momentum PGD, step size = 1e-3
+- **Restarts**: one zero start plus two random starts by default
+- **Best candidate**: exact match, then edit distance, then CTC loss
 - **Constraint**: `clamp(δ, -ε, ε)` after each step
+- **Early stopping**: stop immediately when greedy decoding matches the target
 - **Convergence**: `decode(argmax(logits)) == target_phrase`
 
 ---
@@ -139,14 +145,15 @@ Subject to: ‖δ‖∞ ≤ ε
 | `POST` | `/api/samples/preload` | Trigger dataset scan |
 | `POST` | `/api/attack/start` | Create AttackJob (queued) |
 | `GET` | `/api/attack/{id}/status` | Query attack status |
+| `POST` | `/api/attack/{id}/cancel` | Cooperatively cancel an attack |
 | `GET` | `/api/audio/download/{type}/{filename}` | Download wav |
 
 ### WebSocket
 
 | Message | Direction | Payload |
 |---------|-----------|---------|
-| `attack_started` | S→C | config, original_transcription |
-| `iteration_progress` | S→C | iteration, ctc_loss, l2_loss, snr_db, transcription |
+| `attack_started` | S→C | config, original_transcription, total_iterations_budget |
+| `iteration_progress` | S→C | iteration, restart_index, ctc_loss, l2_loss, snr_db, transcription |
 | `attack_complete` | S→C | success, final_transcription, resource URLs |
 | `attack_error` | S→C | error_code, message |
 
@@ -171,10 +178,12 @@ All in `backend/app/config.py`:
 |----------|---------|-------------|
 | `MODEL_NAME` | `facebook/wav2vec2-base-960h` | Target model |
 | `SAMPLE_RATE` | 16000 | Audio sample rate |
-| `DEFAULT_EPSILON` | 0.01 | Perturbation budget |
+| `DEFAULT_EPSILON` | 0.02 | Perturbation budget |
 | `DEFAULT_MAX_ITER` | 1000 | Max iterations |
-| `DEFAULT_LAMBDA_L2` | 0.1 | L2 regularization |
-| `DEFAULT_LEARNING_RATE` | 5e-4 | Adam learning rate |
+| `DEFAULT_LAMBDA_L2` | 0.02 | L2 regularization |
+| `DEFAULT_LEARNING_RATE` | 1e-3 | PGD step size |
+| `DEFAULT_MOMENTUM` | 0.9 | Momentum coefficient |
+| `DEFAULT_RESTARTS` | 3 | Number of starts |
 | `MIN_DURATION_SEC` | 1.0 | Min audio clip duration |
 | `MAX_DURATION_SEC` | 15.0 | Max audio clip duration |
 

@@ -33,6 +33,7 @@ export const useAttackStore = defineStore('attack', () => {
   const status = ref<AttackStatus>('idle');
   const config = ref<AttackConfigIn | null>(null);
   const currentIteration = ref(0);
+  const totalIterationsBudget = ref(0);
   const ctcLoss = ref(0);
   const l2Loss = ref(0);
   const snrDb = ref(0);
@@ -50,10 +51,10 @@ export const useAttackStore = defineStore('attack', () => {
   const isFailed = computed(() => status.value === 'failed');
 
   const progressPercent = computed(() => {
-    if (!config.value || config.value.max_iterations <= 0) return 0;
+    if (totalIterationsBudget.value <= 0) return 0;
     return Math.min(
       100,
-      (currentIteration.value / config.value.max_iterations) * 100,
+      (currentIteration.value / totalIterationsBudget.value) * 100,
     );
   });
 
@@ -65,6 +66,7 @@ export const useAttackStore = defineStore('attack', () => {
     targetTranscription.value = msg.config.target_phrase;
     currentTranscription.value = msg.original_transcription;
     currentIteration.value = 0;
+    totalIterationsBudget.value = msg.total_iterations_budget;
     error.value = null;
   }
 
@@ -86,11 +88,14 @@ export const useAttackStore = defineStore('attack', () => {
   }
 
   function handleAttackComplete(msg: AttackCompleteMsg): void {
-    status.value = 'completed';
+    status.value = msg.cancelled ? 'cancelled' : 'completed';
     currentIteration.value = msg.total_iterations;
     ctcLoss.value = msg.final_ctc_loss;
     currentTranscription.value = msg.final_transcription;
     targetTranscription.value = msg.target_transcription;
+    if (totalIterationsBudget.value <= 0 && config.value) {
+      totalIterationsBudget.value = config.value.max_iterations * config.value.restarts;
+    }
   }
 
   function handleAttackError(msg: AttackErrorMsg): void {
@@ -136,6 +141,7 @@ export const useAttackStore = defineStore('attack', () => {
     status.value = 'idle';
     config.value = null;
     currentIteration.value = 0;
+    totalIterationsBudget.value = 0;
     ctcLoss.value = 0;
     l2Loss.value = 0;
     snrDb.value = 0;
@@ -153,6 +159,7 @@ export const useAttackStore = defineStore('attack', () => {
     status,
     config,
     currentIteration,
+    totalIterationsBudget,
     ctcLoss,
     l2Loss,
     snrDb,

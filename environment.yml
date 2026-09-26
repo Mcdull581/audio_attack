@@ -1,0 +1,23 @@
+name: audio-attack
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu124
+      - torch==2.4.1+cu124
+      - torchaudio==2.4.1+cu124
+      - transformers==4.44.2
+      - datasets==2.21.0
+      - fastapi==0.114.2
+      - uvicorn[standard]==0.31.1
+      - python-multipart==0.0.20
+      - pydantic==2.13.5
+      - aiofiles==25.1.0
+      - numpy<2.1,>=1.26
+      - soundfile==0.13.1
+      - websockets>=12,<16

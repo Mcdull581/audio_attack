@@ -1,5 +1,5 @@
 """
-WebSocket endpoint that orchestrates the full CW attack lifecycle.
+WebSocket endpoint that orchestrates the full targeted PGD attack lifecycle.
 
 The handler accepts a connection, spawns the PyTorch attack in a
 background thread via ``asyncio.to_thread``, and bridges thread-safe
@@ -120,12 +120,15 @@ async def attack_ws_endpoint(websocket: WebSocket, attack_id: str) -> None:
         "original_transcription": job.original_transcription,
         "audio_duration_sec": audio_duration,
         "push_interval": push_interval,
+        "total_iterations_budget": job.config.max_iterations * job.config.restarts,
     })
 
     # ── Thread-safe progress queue ─────────────────────────────────────
     q: queue.Queue[dict] = queue.Queue()
     # Cancellation flag — set when WebSocket disconnects to stop the attack thread
-    cancel_event = threading.Event()
+    # Share the event with the REST cancel endpoint so both a button click and
+    # a WebSocket disconnect stop the same worker.
+    cancel_event = job.cancel_event
 
     def _attack_runner_sync() -> None:
         """Runs in a background thread — PyTorch + file I/O."""
@@ -136,10 +139,13 @@ async def attack_ws_endpoint(websocket: WebSocket, attack_id: str) -> None:
 
             # Build the config dict expected by the engine
             engine_config: Dict[str, Any] = {
+                "attack_id": attack_id,
                 "epsilon": job.config.epsilon,
                 "max_iterations": job.config.max_iterations,
                 "lambda_l2": job.config.lambda_l2,
                 "learning_rate": job.config.learning_rate,
+                "momentum": job.config.momentum,
+                "restarts": job.config.restarts,
                 "cancel_event": cancel_event,  # thread-safe stop signal
             }
 
@@ -188,6 +194,7 @@ async def attack_ws_endpoint(websocket: WebSocket, attack_id: str) -> None:
                 "final_transcription": final_transcription,
                 "target_transcription": job.config.target_phrase,
                 "success": success,
+                "cancelled": cancel_event.is_set(),
                 "resources": job.result_urls(),
             })
 
@@ -228,7 +235,11 @@ async def attack_ws_endpoint(websocket: WebSocket, attack_id: str) -> None:
 
             if msg_type in ("attack_complete", "attack_error"):
                 if msg_type == "attack_complete":
-                    job.status = AttackStatus.COMPLETED
+                    job.status = (
+                        AttackStatus.CANCELLED
+                        if cancel_event.is_set()
+                        else AttackStatus.COMPLETED
+                    )
                 else:
                     job.status = AttackStatus.FAILED
                 break

@@ -12,6 +12,8 @@ export interface AttackConfigIn {
   max_iterations: number;
   lambda_l2: number;
   learning_rate: number;
+  momentum: number;
+  restarts: number;
 }
 
 // ── Attack status lifecycle ──────────────────────────────────────────────

@@ -25,7 +25,7 @@ MANIFEST_PATH: Path = DATA_DIR.parent / "samples_manifest.json"
 _AUDIO_GLOBS = ("*.mp3", "*.wav", "*.flac", "*.ogg", "*.m4a")
 
 
-def prepare_samples() -> List[Dict[str, Any]]:
+def prepare_samples(force: bool = False) -> List[Dict[str, Any]]:
     """Scan local audio files and generate manifest metadata.
 
     On the first call the function scans ``DATA_DIR`` for audio files,
@@ -37,7 +37,7 @@ def prepare_samples() -> List[Dict[str, Any]]:
     (idempotent).
     """
     # ── Idempotent cache hit ───────────────────────────────────────────
-    if MANIFEST_PATH.exists():
+    if MANIFEST_PATH.exists() and not force:
         logger.info("Manifest found at %s — loading cached samples", MANIFEST_PATH)
         with open(MANIFEST_PATH, "r", encoding="utf-8") as fh:
             manifest: List[Dict[str, Any]] = json.load(fh)
@@ -45,6 +45,22 @@ def prepare_samples() -> List[Dict[str, Any]]:
         return manifest
 
     # ── Scan local directory ───────────────────────────────────────────
+    # Preserve transcriptions already produced by the UI when rebuilding the
+    # manifest, while still adding/removing files as the directory changes.
+    previous_transcriptions: dict[str, str] = {}
+    if MANIFEST_PATH.exists():
+        try:
+            with open(MANIFEST_PATH, "r", encoding="utf-8") as fh:
+                previous = json.load(fh)
+            if isinstance(previous, list):
+                previous_transcriptions = {
+                    str(item.get("name")): str(item.get("transcription", ""))
+                    for item in previous
+                    if isinstance(item, dict) and item.get("name")
+                }
+        except (OSError, json.JSONDecodeError):
+            logger.warning("Ignoring unreadable existing manifest: %s", MANIFEST_PATH)
+
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     audio_files: List[Path] = []
     for glob_pattern in _AUDIO_GLOBS:
@@ -91,7 +107,7 @@ def prepare_samples() -> List[Dict[str, Any]]:
             "name": name,
             "local_path": rel_path,
             "duration_sec": round(duration_sec, 2),
-            "transcription": "",  # no transcription for local files
+            "transcription": previous_transcriptions.get(name, ""),
         }
         manifest.append(entry)
 

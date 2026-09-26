@@ -44,6 +44,13 @@ export const useAudioStore = defineStore('audio', () => {
     isPlaying.value = false;
   }
 
+  /** Clear results from the previous attack without losing the selected sample. */
+  function clearAttackResults(): void {
+    adversarialUrl.value = null;
+    deltaUrl.value = null;
+    isPlaying.value = false;
+  }
+
   // ── Public API ─────────────────────────────────────────────────────────
 
   return {
@@ -57,6 +64,7 @@ export const useAudioStore = defineStore('audio', () => {
     setResources,
     setSample,
     togglePlay,
+    clearAttackResults,
     reset,
   };
 });

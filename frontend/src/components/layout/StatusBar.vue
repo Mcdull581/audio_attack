@@ -38,13 +38,13 @@ import { storeToRefs } from 'pinia'
 import { useAttackStore } from '@/stores/attackStore'
 
 const attackStore = useAttackStore()
-const { status, currentIteration } = storeToRefs(attackStore)
+const { status, currentIteration, totalIterationsBudget } = storeToRefs(attackStore)
 
-const maxIterations = computed(() => attackStore.config?.max_iterations ?? 0)
+const maxIterations = computed(() => totalIterationsBudget.value)
 
 const progressPercent = computed(() => {
-  if (!attackStore.config || attackStore.config.max_iterations <= 0) return 0
-  return Math.min(100, Math.round((currentIteration.value / attackStore.config.max_iterations) * 100))
+  if (totalIterationsBudget.value <= 0) return 0
+  return Math.min(100, Math.round((currentIteration.value / totalIterationsBudget.value) * 100))
 })
 
 const statusDotClass = computed(() => {
@@ -53,6 +53,7 @@ const statusDotClass = computed(() => {
     case 'queued': return 'bg-yellow-400'
     case 'completed': return 'bg-blue-400'
     case 'failed': return 'bg-red-400'
+    case 'cancelled': return 'bg-yellow-400'
     default: return 'bg-gray-600'
   }
 })
@@ -63,6 +64,7 @@ const statusLabel = computed(() => {
     case 'queued': return 'Queued'
     case 'completed': return 'Completed'
     case 'failed': return 'Failed'
+    case 'cancelled': return 'Cancelled'
     default: return 'Idle'
   }
 })
